@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection
+from users.models import User
 
 class ChapterSectionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,3 +37,26 @@ class GradeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Grade
         fields = '__all__'
+
+class StudentPublicProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name'] # NUNCA exponer email ni logs aquí
+
+# 2. Serializador de Perfil Completo (Lo que ve el profesor)
+class StudentAnalyticsProfileSerializer(serializers.ModelSerializer):
+    # Podrías agregar campos calculados aquí más adelante (ej. tiempo_total)
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+
+class SectionChapterControlSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SectionChapterControl
+        fields = '__all__'
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActivityLog
+        fields = '__all__'
+        read_only_fields = ['student', 'timestamp']

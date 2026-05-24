@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
@@ -27,3 +27,14 @@ class ClassSectionAdmin(admin.ModelAdmin):
     filter_horizontal = ('teachers', 'students') # Interfaz limpia para seleccionar múltiples usuarios
 
 admin.site.register(Grade)
+
+@admin.register(SectionChapterControl)
+class SectionChapterControlAdmin(admin.ModelAdmin):
+    list_display = ('section', 'chapter', 'is_visible', 'due_date')
+    list_filter = ('section', 'is_visible')
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = ('student', 'event_type', 'chapter_section', 'timestamp')
+    list_filter = ('event_type', 'section')
+    search_fields = ('student__username', 'student__email')

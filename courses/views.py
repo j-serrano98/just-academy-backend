@@ -2,9 +2,13 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade
+from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
-                          ChapterSectionSerializer, ClassSectionSerializer, GradeSerializer)
+                          ChapterSectionSerializer, ClassSectionSerializer, GradeSerializer,
+                          ClassSectionSerializer, SectionChapterControlSerializer, 
+                          ActivityLogSerializer, StudentPublicProfileSerializer, 
+                          StudentAnalyticsProfileSerializer)
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
@@ -79,18 +83,82 @@ class ChapterSectionViewSet(viewsets.ModelViewSet):
     serializer_class = ChapterSectionSerializer
 
 class ClassSectionViewSet(viewsets.ModelViewSet):
-    queryset = ClassSection.objects.all()
+    queryset = ClassSection.objects.prefetch_related('students', 'teachers', 'course')
     serializer_class = ClassSectionSerializer
+    permission_classes = [IsAuthenticated, IsTeacherOfSectionOrReadOnly]
 
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
-    def my_sections(self, request):
+    def get_queryset(self):
+        """
+        Filtro de seguridad a nivel de base de datos.
+        Un usuario JAMÁS podrá consultar una sección a la que no pertenece.
+        """
+        user = self.request.user
+        if user.is_teacher:
+            return self.queryset.filter(teachers=user)
+        return self.queryset.filter(students=user)
+
+    # ENDPOINT PARA LISTAR ESTUDIANTES CON PRIVACIDAD CONDICIONAL
+    @action(detail=True, methods=['get'], url_path='participants')
+    def participants(self, request, pk=None):
+        section = self.get_object() # get_object() ya valida que pertenezcan a la sección gracias a get_queryset()
+        students = section.students.all()
+        
+        # Si es profesor, mandamos toda la analítica
         if request.user.is_teacher:
-            sections = self.queryset.filter(teachers=request.user)
-        else:
-            sections = self.queryset.filter(students=request.user)
+            serializer = StudentAnalyticsProfileSerializer(students, many=True)
+            return Response({'is_teacher_view': True, 'participants': serializer.data})
+        
+        # Si es estudiante, mandamos la versión censurada (solo nombres/avatares)
+        serializer = StudentPublicProfileSerializer(students, many=True)
+        return Response({'is_teacher_view': False, 'participants': serializer.data})
+
+    # ENDPOINT PARA QUE EL PROFESOR VEA EL ANALYTICS DE UN ALUMNO EN ESTA SECCIÓN
+    @action(detail=True, methods=['get'], url_path='student-analytics/(?P<student_id>\d+)', permission_classes=[IsAuthenticated, IsTeacher])
+    def student_analytics(self, request, pk=None, student_id=None):
+        section = self.get_object()
+        
+        # Verificar si el profesor enseña esta sección
+        if not section.teachers.filter(id=request.user.id).exists():
+            return Response({"error": "No tienes permisos de profesor en esta sección"}, status=403)
             
-        serializer = self.get_serializer(sections, many=True)
-        return Response(serializer.data)
+        logs = ActivityLog.objects.filter(section=section, student_id=student_id)
+        serializer = ActivityLogSerializer(logs, many=True)
+        
+        # Aquí puedes agregar lógica para sumar el duration_seconds total, sacar promedios de quizzes, etc.
+        total_time = sum(log.duration_seconds for log in logs)
+        
+        return Response({
+            "total_time_seconds": total_time,
+            "activity_logs": serializer.data
+        })
+
+class SectionChapterControlViewSet(viewsets.ModelViewSet):
+    queryset = SectionChapterControl.objects.all()
+    serializer_class = SectionChapterControlSerializer
+    permission_classes = [IsAuthenticated, IsTeacher] # Solo profesores pueden manipular la visibilidad
+
+class ActivityLogViewSet(viewsets.ModelViewSet):
+    """
+    Endpoint para que el Frontend envíe telemetría (logs) de lo que hace el estudiante.
+    """
+    queryset = ActivityLog.objects.all()
+    serializer_class = ActivityLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Un profesor puede ver los logs de sus secciones, un estudiante solo los suyos
+        user = self.request.user
+        if user.is_teacher:
+            sections = ClassSection.objects.filter(teachers=user)
+            return self.queryset.filter(section__in=sections)
+        return self.queryset.filter(student=user)
+
+    def perform_create(self, serializer):
+        """
+        SEGURIDAD CRÍTICA: Forzamos que el creador del log sea el usuario que hace la petición.
+        El frontend no puede enviar "student_id=2" si el que está logueado es el 1.
+        """
+        serializer.save(student=self.request.user)
 
 class GradeViewSet(viewsets.ModelViewSet):
     queryset = Grade.objects.all()

@@ -1,5 +1,7 @@
 from django.db import models
 from django.conf import settings
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 class Course(models.Model):
     title = models.CharField(max_length=255)
@@ -71,3 +73,39 @@ class Grade(models.Model):
 
     def __str__(self):
         return f"{self.student.username} - {self.chapter_section.title}: {self.score}"
+    
+class SectionChapterControl(models.Model):
+    """Controla qué capítulos están visibles y sus fechas límite por sección."""
+    section = models.ForeignKey('ClassSection', on_delete=models.CASCADE, related_name='chapter_controls')
+    chapter = models.ForeignKey('Chapter', on_delete=models.CASCADE)
+    is_visible = models.BooleanField(default=False)
+    due_date = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('section', 'chapter') # Un capítulo no puede tener dos controles en la misma sección
+
+    def __str__(self):
+        return f"{self.chapter.title} - {self.section.name}"
+
+class ActivityLog(models.Model):
+    """Registro inmutable de lo que hace el estudiante (Trazabilidad)."""
+    EVENT_CHOICES = (
+        ('open', 'Opened Activity'),
+        ('complete', 'Completed Activity'),
+        ('quiz_submit', 'Submitted Quiz'),
+        ('time_heartbeat', 'Time Heartbeat'), # Para contar tiempo
+    )
+    
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='activity_logs')
+    section = models.ForeignKey('ClassSection', on_delete=models.CASCADE)
+    chapter_section = models.ForeignKey('ChapterSection', on_delete=models.CASCADE) # La actividad específica
+    event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
+    duration_seconds = models.IntegerField(default=0, help_text="Tiempo invertido en esta sesión de actividad")
+    metadata = models.JSONField(null=True, blank=True) # Para guardar notas del quiz (ej: {"score": 80})
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['student', 'section']), # Optimización para consultas analíticas
+        ]
