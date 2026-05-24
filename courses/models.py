@@ -1,0 +1,73 @@
+from django.db import models
+from django.conf import settings
+
+class Course(models.Model):
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    
+    thumbnail = models.URLField(max_length=800, blank=True, null=True)
+    
+    is_archived = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+class Module(models.Model):
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='modules')
+    title = models.CharField(max_length=255)
+    order = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.course.title} - {self.title}"
+
+class Chapter(models.Model):
+    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name='chapters')
+    title = models.CharField(max_length=255)
+    order = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return self.title
+
+class ChapterSection(models.Model):
+    SECTION_TYPES = (
+        ('video', 'Video'),
+        ('exercise', 'Ejercicio'),
+        ('quiz', 'Quiz'),
+        ('game', 'Juego'),
+        ('practice', 'Práctica'),
+        ('manual_task', 'Tarea Manual'),
+    )
+    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='sections')
+    title = models.CharField(max_length=255)
+    section_type = models.CharField(max_length=20, choices=SECTION_TYPES)
+    content = models.JSONField(default=dict, blank=True) # Para guardar JSONs como el de Interchange
+    order = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.title} ({self.get_section_type_display()})"
+
+class ClassSection(models.Model):
+    """ Esta es la sección donde se imparte el curso a un grupo específico """
+    name = models.CharField(max_length=255) # Ej: "Inglés 1 - Lunes Noche"
+    course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name='class_sections')
+    teachers = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='teaching_sections', limit_choices_to={'is_teacher': True})
+    students = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='enrolled_sections', limit_choices_to={'is_student': True})
+    show_grades = models.BooleanField(default=False) # Visibilidad de calificaciones deshabilitada por defecto
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+class Grade(models.Model):
+    """ Calificaciones de las tareas/quizzes de un estudiante en una sección específica """
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='grades')
+    class_section = models.ForeignKey(ClassSection, on_delete=models.CASCADE, related_name='grades')
+    chapter_section = models.ForeignKey(ChapterSection, on_delete=models.CASCADE) # La actividad evaluada
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    teacher_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.student.username} - {self.chapter_section.title}: {self.score}"
