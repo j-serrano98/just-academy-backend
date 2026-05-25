@@ -37,6 +37,7 @@ class Chapter(models.Model):
 class ChapterSection(models.Model):
     SECTION_TYPES = (
         ('video', 'Video'),
+        ('reading', 'Lectura'),
         ('exercise', 'Ejercicio'),
         ('quiz', 'Quiz'),
         ('game', 'Juego'),
@@ -45,7 +46,7 @@ class ChapterSection(models.Model):
     )
     chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='sections')
     title = models.CharField(max_length=255)
-    section_type = models.CharField(max_length=20, choices=SECTION_TYPES)
+    section_type = models.CharField(max_length=20, choices=SECTION_TYPES, default='video')
     content = models.JSONField(default=dict, blank=True) # Para guardar JSONs como el de Interchange
     order = models.PositiveIntegerField(default=0)
 

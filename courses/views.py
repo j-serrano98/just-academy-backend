@@ -197,6 +197,33 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
         control.save()
         
         return Response({'status': 'ok'})
+    
+    @action(detail=True, methods=['post'], url_path='toggle-completion')
+    def toggle_completion(self, request, pk=None):
+        section = self.get_object()
+        activity_id = request.data.get('activity_id')
+        is_completed = request.data.get('is_completed', True)
+        
+        activity = ChapterSection.objects.get(id=activity_id)
+        
+        if is_completed:
+            # Creamos el registro de completado
+            ActivityLog.objects.get_or_create(
+                section=section,
+                student=request.user,
+                chapter_section=activity,
+                defaults={'event_type': 'complete', 'duration_seconds': 0}
+            )
+        else:
+            # Borramos el registro si el alumno decide desmarcarla
+            ActivityLog.objects.filter(
+                section=section,
+                student=request.user,
+                chapter_section=activity,
+                event_type='complete'
+            ).delete()
+            
+        return Response({'status': 'ok'})
 
 class SectionChapterControlViewSet(viewsets.ModelViewSet):
     queryset = SectionChapterControl.objects.all()
