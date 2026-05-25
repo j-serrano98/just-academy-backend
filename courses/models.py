@@ -9,7 +9,9 @@ class Course(models.Model):
     
     thumbnail = models.URLField(max_length=800, blank=True, null=True)
     
+    is_published = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -56,6 +58,7 @@ class ClassSection(models.Model):
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name='class_sections')
     teachers = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='teaching_sections', limit_choices_to={'is_teacher': True})
     students = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='enrolled_sections', limit_choices_to={'is_student': True})
+    max_students = models.IntegerField(default=0, help_text="0 significa sin límite de cupo")
     show_grades = models.BooleanField(default=False) # Visibilidad de calificaciones deshabilitada por defecto
     is_active = models.BooleanField(default=True)
 
@@ -109,3 +112,43 @@ class ActivityLog(models.Model):
         indexes = [
             models.Index(fields=['student', 'section']), # Optimización para consultas analíticas
         ]
+
+class ExtracurricularActivity(models.Model):
+    """Actividades exclusivas de la sección anidadas dentro del temario."""
+    section = models.ForeignKey('ClassSection', on_delete=models.CASCADE, related_name='extra_activities')
+    
+    # Agregamos null=True, blank=True para que Django no se queje con las tareas viejas
+    chapter = models.ForeignKey('Chapter', on_delete=models.CASCADE, related_name='extra_activities', null=True, blank=True)
+    
+    title = models.CharField(max_length=200)
+    section_type = models.CharField(max_length=50, choices=ChapterSection.SECTION_TYPES, default='exercise')
+    content = models.JSONField(default=dict, blank=True)
+    due_date = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class SectionActivityControl(models.Model):
+    """Controla la visibilidad y fechas límite de las actividades del curso maestro en una sección específica."""
+    section = models.ForeignKey('ClassSection', on_delete=models.CASCADE, related_name='activity_controls')
+    activity = models.ForeignKey('ChapterSection', on_delete=models.CASCADE)
+    
+    # Cambiamos is_unlocked a is_visible para que funcione con los botones de "ojito" del frontend
+    is_visible = models.BooleanField(default=False) 
+    
+    due_date = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('section', 'activity')
+
+class SectionCustomTask(models.Model):
+    """Tareas, ejercicios o material exclusivo de esta sección (no afecta al curso maestro)."""
+    section = models.ForeignKey('ClassSection', on_delete=models.CASCADE, related_name='custom_tasks')
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    task_type = models.CharField(max_length=50, choices=(
+        ('assignment', 'Entrega de Tarea'),
+        ('reading', 'Material de Lectura'),
+        ('zoom', 'Clase en Vivo (Link)'),
+    ))
+    due_date = models.DateTimeField(null=True, blank=True)
+    url_link = models.URLField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)

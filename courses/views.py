@@ -3,12 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
                           ChapterSectionSerializer, ClassSectionSerializer, GradeSerializer,
                           ClassSectionSerializer, SectionChapterControlSerializer, 
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
-                          StudentAnalyticsProfileSerializer)
+                          StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer)
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
@@ -53,22 +53,34 @@ class CourseViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(new_course)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
-    # NUEVO: Endpoint para inscribirse a un curso
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def enroll(self, request, pk=None):
         course = self.get_object()
-        user = request.user
         
-        # Para simplificar, buscamos o creamos una sección general para este curso
-        section, created = ClassSection.objects.get_or_create(
-            course=course,
-            name=f"Grupo General - {course.title}",
-            defaults={'is_active': True}
+        # 1. Buscar la sección principal activa de este curso
+        section = ClassSection.objects.filter(course=course, is_active=True).first()
+        
+        if not section:
+            return Response(
+                {'error': 'No hay grupos o secciones activas para este curso en este momento.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # 2. Inscribir al estudiante en la SECCIÓN
+        section.students.add(request.user)
+        
+        return Response(
+            {'message': f'¡Te has inscrito al curso con éxito en el grupo: {section.name}!'}, 
+            status=status.HTTP_200_OK
         )
-        
-        # Añadimos al usuario a los estudiantes de esta sección
-        section.students.add(user)
-        return Response({'status': 'Inscrito correctamente', 'section_id': section.id}, status=status.HTTP_200_OK)
+    
+    def get_queryset(self):
+        # Si es un profesor viendo sus cursos para editar, se los mostramos todos
+        if self.request.user.is_authenticated and self.request.user.is_teacher:
+            return Course.objects.all()
+            
+        # Si es un estudiante o alguien público navegando en /courses, SOLO LOS PUBLICADOS
+        return Course.objects.filter(is_published=True, is_archived=False)
 
 class ModuleViewSet(viewsets.ModelViewSet):
     queryset = Module.objects.all()
@@ -131,6 +143,44 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
             "total_time_seconds": total_time,
             "activity_logs": serializer.data
         })
+    
+    @action(detail=True, methods=['post'], url_path='toggle-visibility')
+    def toggle_visibility(self, request, pk=None):
+        section = self.get_object()
+        entity_type = request.data.get('entity_type') # 'module', 'chapter', 'activity'
+        entity_id = request.data.get('entity_id')
+        is_visible = request.data.get('is_visible', False)
+
+        activities = []
+        if entity_type == 'module':
+            module = Module.objects.get(id=entity_id)
+            for chapter in module.chapters.all():
+                activities.extend(list(chapter.sections.all()))
+        elif entity_type == 'chapter':
+            chapter = Chapter.objects.get(id=entity_id)
+            activities.extend(list(chapter.sections.all()))
+        elif entity_type == 'activity':
+            activities.append(ChapterSection.objects.get(id=entity_id))
+
+        for act in activities:
+            control, _ = SectionActivityControl.objects.get_or_create(section=section, activity=act)
+            control.is_visible = is_visible
+            control.save()
+
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['post'], url_path='set-due-date')
+    def set_due_date(self, request, pk=None):
+        section = self.get_object()
+        activity_id = request.data.get('activity_id')
+        due_date = request.data.get('due_date') # Recibe un string ISO o None
+        
+        act = ChapterSection.objects.get(id=activity_id)
+        control, _ = SectionActivityControl.objects.get_or_create(section=section, activity=act)
+        control.due_date = due_date if due_date else None
+        control.save()
+        
+        return Response({'status': 'ok'})
 
 class SectionChapterControlViewSet(viewsets.ModelViewSet):
     queryset = SectionChapterControl.objects.all()
@@ -163,3 +213,9 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
 class GradeViewSet(viewsets.ModelViewSet):
     queryset = Grade.objects.all()
     serializer_class = GradeSerializer
+
+
+class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
+    queryset = ExtracurricularActivity.objects.all()
+    serializer_class = ExtracurricularActivitySerializer
+    permission_classes = [IsAuthenticated, IsTeacher]

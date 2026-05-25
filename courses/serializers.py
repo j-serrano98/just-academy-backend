@@ -1,6 +1,8 @@
 from rest_framework import serializers
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection, ExtracurricularActivity, SectionActivityControl
+from django.contrib.auth import get_user_model
 from users.models import User
+User = get_user_model()
 
 class ChapterSectionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -20,18 +22,53 @@ class ModuleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class CourseSerializer(serializers.ModelSerializer):
-    modules = ModuleSerializer(many=True, read_only=True)
+    is_enrolled = serializers.SerializerMethodField()
+    modules = ModuleSerializer(many=True, read_only=True) # Asumiendo que tienes esto
+
     class Meta:
         model = Course
         fields = '__all__'
 
+    def get_is_enrolled(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            # Verifica si el estudiante está en ALGUNA sección de este curso
+            return ClassSection.objects.filter(course=obj, students=request.user).exists()
+        return False
+    
+class ExtracurricularActivitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExtracurricularActivity
+        fields = '__all__'
+
+class SectionActivityControlSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SectionActivityControl
+        fields = '__all__'
+
 class ClassSectionSerializer(serializers.ModelSerializer):
-    # Esto creará el objeto 'course_details' que el frontend necesita para leer .title y .description
     course_details = CourseSerializer(source='course', read_only=True)
+
+
+    extra_activities = ExtracurricularActivitySerializer(many=True, read_only=True)
+    activity_controls = SectionActivityControlSerializer(many=True, read_only=True)
+
+    # 3. Pasamos User.objects.all() al queryset para que DRF pueda validar los IDs
+    students = serializers.PrimaryKeyRelatedField(
+        many=True, 
+        required=False, 
+        queryset=User.objects.all()
+    )
+    
+    teachers = serializers.PrimaryKeyRelatedField(
+        many=True, 
+        required=False, 
+        queryset=User.objects.all()
+    )
 
     class Meta:
         model = ClassSection
-        fields = ['id', 'name', 'course', 'course_details', 'is_active', 'teachers', 'students']
+        fields = ['id', 'name', 'course', 'course_details', 'is_active', 'teachers', 'students', 'show_grades', 'extra_activities', 'activity_controls']
 
 class GradeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -60,3 +97,4 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         model = ActivityLog
         fields = '__all__'
         read_only_fields = ['student', 'timestamp']
+
