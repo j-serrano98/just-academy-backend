@@ -4,26 +4,65 @@ from django.contrib.auth import get_user_model
 from users.models import User
 User = get_user_model()
 
+class UserProfileSerializer(serializers.ModelSerializer):
+    # Traemos las secciones donde el usuario está inscrito
+    enrolled_sections = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'enrolled_sections']
+
+    def get_enrolled_sections(self, obj):
+        # Buscamos todas las secciones donde este usuario sea estudiante
+        sections = ClassSection.objects.filter(students=obj)
+        return [{"id": s.id, "name": s.name, "course_name": s.course.title} for s in sections]
+
 class ChapterSectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChapterSection
-        fields = '__all__'
+        fields = ['id', 'title', 'content', 'section_type', 'order'] # content es el JSON que guarda el BlockEditor
 
 class ChapterSerializer(serializers.ModelSerializer):
+    # Esto es crucial: asegúrate de que 'module' sea un PrimaryKeyRelatedField o simplemente 
+    # permite que el ViewSet lo asigne automáticamente.
     sections = ChapterSectionSerializer(many=True, read_only=True)
+    
     class Meta:
         model = Chapter
-        fields = '__all__'
+        fields = ['id', 'module', 'title', 'sections', 'order']
 
-class ModuleSerializer(serializers.ModelSerializer):
+class CourseDetailSerializer(serializers.ModelSerializer):
     chapters = ChapterSerializer(many=True, read_only=True)
     class Meta:
-        model = Module
-        fields = '__all__'
+        model = Course
+        fields = ['id', 'title', 'chapters']
 
+class ModuleSerializer(serializers.ModelSerializer):
+    # El related_name en el modelo debe ser 'chapters'
+    chapters = ChapterSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Module
+        fields = ['id', 'course', 'title', 'chapters', 'order']
+
+class PublicSectionSerializer(serializers.ModelSerializer):
+    students_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ClassSection
+        fields = ['id', 'name', 'is_active', 'max_students', 'students_count']
+        
+    def get_students_count(self, obj):
+        return obj.students.count()
+    
 class CourseSerializer(serializers.ModelSerializer):
+    # ESTA ES LA LÍNEA MÁGICA QUE FALTABA:
+    modules = ModuleSerializer(many=True, read_only=True) 
+    
     is_enrolled = serializers.SerializerMethodField()
-    modules = ModuleSerializer(many=True, read_only=True) # Asumiendo que tienes esto
+    
+    # (Asumiendo que tienes el PublicSectionSerializer de pasos anteriores)
+    class_sections = PublicSectionSerializer(many=True, read_only=True) 
 
     class Meta:
         model = Course
@@ -32,7 +71,6 @@ class CourseSerializer(serializers.ModelSerializer):
     def get_is_enrolled(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            # Verifica si el estudiante está en ALGUNA sección de este curso
             return ClassSection.objects.filter(course=obj, students=request.user).exists()
         return False
     

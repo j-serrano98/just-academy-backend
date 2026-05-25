@@ -56,23 +56,39 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def enroll(self, request, pk=None):
         course = self.get_object()
+        section_id = request.data.get('section_id') # Esperamos un ID numérico o la palabra 'async'
         
-        # 1. Buscar la sección principal activa de este curso
-        section = ClassSection.objects.filter(course=course, is_active=True).first()
-        
-        if not section:
-            return Response(
-                {'error': 'No hay grupos o secciones activas para este curso en este momento.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # 1. VERIFICAR INSCRIPCIÓN DOBLE
+        if ClassSection.objects.filter(course=course, students=request.user).exists():
+            return Response({'error': 'Ya estás inscrito en este curso en otro grupo.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        # 2. Inscribir al estudiante en la SECCIÓN
+        # 2. MANEJAR MODALIDAD ASÍNCRONA (AUTODIDACTA)
+        if section_id == 'async':
+            # Buscamos o creamos el grupo "Autodidacta" para este curso
+            section, created = ClassSection.objects.get_or_create(
+                course=course,
+                name="Modalidad Asíncrona (A tu propio ritmo)",
+                defaults={'is_active': True, 'max_students': 0, 'show_grades': False}
+            )
+        
+        # 3. MANEJAR GRUPOS REGULARES (SÁBADOS, ETC)
+        else:
+            try:
+                section = ClassSection.objects.get(id=section_id, course=course, is_active=True)
+            except ClassSection.DoesNotExist:
+                return Response({'error': 'El grupo seleccionado no existe o está cerrado.'}, status=status.HTTP_404_NOT_FOUND)
+                
+            # Verificar Cupos
+            if section.max_students > 0 and section.students.count() >= section.max_students:
+                return Response({'error': 'Este grupo ya no tiene cupos disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
+                
+        # 4. INSCRIBIR AL ALUMNO
         section.students.add(request.user)
         
-        return Response(
-            {'message': f'¡Te has inscrito al curso con éxito en el grupo: {section.name}!'}, 
-            status=status.HTTP_200_OK
-        )
+        return Response({
+            'message': f'¡Inscripción exitosa en: {section.name}!',
+            'section_id': section.id
+        }, status=status.HTTP_200_OK)
     
     def get_queryset(self):
         # Si es un profesor viendo sus cursos para editar, se los mostramos todos
