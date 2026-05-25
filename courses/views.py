@@ -198,32 +198,39 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
         
         return Response({'status': 'ok'})
     
-    @action(detail=True, methods=['post'], url_path='toggle-completion')
+    @action(detail=True, methods=['post'], url_path='toggle-completion', permission_classes=[IsAuthenticated])
     def toggle_completion(self, request, pk=None):
         section = self.get_object()
         activity_id = request.data.get('activity_id')
         is_completed = request.data.get('is_completed', True)
         
-        activity = ChapterSection.objects.get(id=activity_id)
-        
-        if is_completed:
-            # Creamos el registro de completado
-            ActivityLog.objects.get_or_create(
-                section=section,
-                student=request.user,
-                chapter_section=activity,
-                defaults={'event_type': 'complete', 'duration_seconds': 0}
-            )
-        else:
-            # Borramos el registro si el alumno decide desmarcarla
-            ActivityLog.objects.filter(
-                section=section,
-                student=request.user,
-                chapter_section=activity,
-                event_type='complete'
-            ).delete()
+        try:
+            activity = ChapterSection.objects.get(id=activity_id)
             
-        return Response({'status': 'ok'})
+            if is_completed:
+                # CORRECCIÓN AQUÍ: Incluimos event_type='complete' en la BÚSQUEDA, no en el default
+                ActivityLog.objects.get_or_create(
+                    section=section,
+                    student=request.user,
+                    chapter_section=activity,
+                    event_type='complete', # <-- AHORA SÍ BUSCARÁ SOLO LOS COMPLETADOS
+                    defaults={'duration_seconds': 0}
+                )
+            else:
+                # Borramos el registro si el alumno decide desmarcarla
+                ActivityLog.objects.filter(
+                    section=section,
+                    student=request.user,
+                    chapter_section=activity,
+                    event_type='complete'
+                ).delete()
+                
+            return Response({'status': 'ok'})
+            
+        except ChapterSection.DoesNotExist:
+            return Response({'error': 'La actividad no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SectionChapterControlViewSet(viewsets.ModelViewSet):
     queryset = SectionChapterControl.objects.all()
