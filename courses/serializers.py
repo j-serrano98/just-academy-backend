@@ -84,13 +84,14 @@ class SectionActivityControlSerializer(serializers.ModelSerializer):
     class Meta:
         model = SectionActivityControl
         fields = '__all__'
-
 class ClassSectionSerializer(serializers.ModelSerializer):
     course_details = CourseSerializer(source='course', read_only=True)
     extra_activities = ExtracurricularActivitySerializer(many=True, read_only=True)
     activity_controls = SectionActivityControlSerializer(many=True, read_only=True)
     
-    # NUEVOS CAMPOS:
+    # CAMPOS CALCULADOS
+    total_active_lessons = serializers.SerializerMethodField()
+    completed_lessons_count = serializers.SerializerMethodField()
     completed_activities = serializers.SerializerMethodField()
     resume_activity_id = serializers.SerializerMethodField()
 
@@ -99,16 +100,43 @@ class ClassSectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClassSection
-        fields = ['id', 'name', 'course', 'course_details', 'is_active', 'teachers', 'students', 'show_grades', 'extra_activities', 'activity_controls', 'completed_activities', 'resume_activity_id']
+        # AQUÍ DEBEN ESTAR TODOS LOS CAMPOS NUEVOS
+        fields = [
+            'id', 'name', 'course', 'course_details', 'is_active', 
+            'teachers', 'students', 'show_grades', 'extra_activities', 
+            'activity_controls', 'completed_activities', 'resume_activity_id',
+            'total_active_lessons', 'completed_lessons_count'
+        ]
 
     def get_completed_activities(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            # Trae todos los IDs de actividades completadas por este alumno en este grupo
             return list(ActivityLog.objects.filter(
                 section=obj, student=request.user, event_type='complete'
             ).values_list('chapter_section_id', flat=True))
         return []
+    
+    def get_total_active_lessons(self, obj):
+        # Usamos .activity_id para obtener el número entero, no el objeto completo
+        visible_base_ids = [
+            ctrl.activity_id for ctrl in obj.activity_controls.all() if ctrl.is_visible
+        ]
+        total_extras = obj.extra_activities.count()
+        return len(visible_base_ids) + total_extras
+    
+    def get_completed_lessons_count(self, obj):
+        # Usamos .activity_id para obtener el número entero aquí también
+        visible_base_ids = [
+            ctrl.activity_id for ctrl in obj.activity_controls.all() if ctrl.is_visible
+        ]
+        extra_ids = [extra.id for extra in obj.extra_activities.all()]
+        
+        allowed_ids = set(visible_base_ids + extra_ids)
+        completed_list = self.get_completed_activities(obj) 
+        
+        # Ahora sí comparará enteros con enteros correctamente
+        actual_completed = [act_id for act_id in completed_list if act_id in allowed_ids]
+        return len(actual_completed)
 
     def get_resume_activity_id(self, obj):
         request = self.context.get('request')
@@ -117,7 +145,6 @@ class ClassSectionSerializer(serializers.ModelSerializer):
 
         completed_logs = self.get_completed_activities(obj)
 
-        # Aplanamos el temario para obtener una lista ordenada de TODAS las actividades
         ordered_activities = []
         for module in obj.course.modules.all().order_by('order', 'id'):
             for chapter in module.chapters.all().order_by('order', 'id'):
@@ -125,12 +152,11 @@ class ClassSectionSerializer(serializers.ModelSerializer):
                     ordered_activities.append(section.id)
 
         if not ordered_activities:
-            return 0 # El curso no tiene contenido
+            return 0 
 
         if not completed_logs:
-            return ordered_activities[0] # No ha hecho nada, mandarlo a la primera
+            return ordered_activities[0] 
 
-        # LÓGICA INTELIGENTE: Buscar el índice máximo completado
         max_idx = -1
         for comp_id in completed_logs:
             try:
@@ -140,33 +166,10 @@ class ClassSectionSerializer(serializers.ModelSerializer):
             except ValueError:
                 pass
 
-        # Devolver la que sigue después de la última completada (saltándose huecos)
         if max_idx + 1 < len(ordered_activities):
             return ordered_activities[max_idx + 1]
         
-        # Si ya completó todo el curso, lo mandamos a la primera
         return ordered_activities[0]
-
-
-    extra_activities = ExtracurricularActivitySerializer(many=True, read_only=True)
-    activity_controls = SectionActivityControlSerializer(many=True, read_only=True)
-
-    # 3. Pasamos User.objects.all() al queryset para que DRF pueda validar los IDs
-    students = serializers.PrimaryKeyRelatedField(
-        many=True, 
-        required=False, 
-        queryset=User.objects.all()
-    )
-    
-    teachers = serializers.PrimaryKeyRelatedField(
-        many=True, 
-        required=False, 
-        queryset=User.objects.all()
-    )
-
-    class Meta:
-        model = ClassSection
-        fields = ['id', 'name', 'course', 'course_details', 'is_active', 'teachers', 'students', 'show_grades', 'extra_activities', 'activity_controls', 'completed_activities', 'resume_activity_id']
 
 class GradeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -174,16 +177,37 @@ class GradeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class StudentPublicProfileSerializer(serializers.ModelSerializer):
+    completed_count = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name'] # NUNCA exponer email ni logs aquí
+        fields = ['id', 'username', 'first_name', 'last_name', 'completed_count']
+
+    def get_completed_count(self, obj):
+        if 'view' in self.context and hasattr(self.context['view'], 'kwargs'):
+            section_id = self.context['view'].kwargs.get('pk')
+            if section_id:
+                return ActivityLog.objects.filter(
+                    section_id=section_id, student=obj, event_type='complete'
+                ).values('chapter_section').distinct().count()
+        return 0
 
 # 2. Serializador de Perfil Completo (Lo que ve el profesor)
 class StudentAnalyticsProfileSerializer(serializers.ModelSerializer):
-    # Podrías agregar campos calculados aquí más adelante (ej. tiempo_total)
+    completed_count = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'completed_count']
+
+    def get_completed_count(self, obj):
+        if 'view' in self.context and hasattr(self.context['view'], 'kwargs'):
+            section_id = self.context['view'].kwargs.get('pk')
+            if section_id:
+                return ActivityLog.objects.filter(
+                    section_id=section_id, student=obj, event_type='complete'
+                ).values('chapter_section').distinct().count()
+        return 0
 
 class SectionChapterControlSerializer(serializers.ModelSerializer):
     class Meta:
@@ -191,8 +215,25 @@ class SectionChapterControlSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ActivityLogSerializer(serializers.ModelSerializer):
+    class_title = serializers.SerializerMethodField()
+
     class Meta:
         model = ActivityLog
-        fields = '__all__'
-        read_only_fields = ['student', 'timestamp']
-
+        fields = ['id', 'section', 'chapter_section', 'class_title', 'event_type', 'duration_seconds', 'timestamp']
+        
+    def get_class_title(self, obj):
+        from .models import ChapterSection
+        try:
+            # Si el campo se comporta como un objeto ForeignKey
+            if hasattr(obj, 'chapter_section') and hasattr(obj.chapter_section, 'title'):
+                return obj.chapter_section.title
+            
+            # Si el campo se comporta como un Integer (ID)
+            elif isinstance(obj.chapter_section, int) or isinstance(obj.chapter_section, str):
+                act = ChapterSection.objects.filter(id=int(obj.chapter_section)).first()
+                if act:
+                    return act.title
+        except Exception:
+            pass
+            
+        return "Actividad o Recurso Extra"
