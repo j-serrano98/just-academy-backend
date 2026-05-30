@@ -124,6 +124,31 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
         if user.is_teacher:
             return self.queryset.filter(teachers=user)
         return self.queryset.filter(students=user)
+    
+    def list(self, request, *args, **kwargs):
+        try:
+            # Forzamos la ejecución real de la query SQL evaluando el queryset en una lista
+            queryset = self.filter_queryset(self.get_queryset())
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            # 🚨 ESTA ES LA MAGIA: Imprime el error exacto de Python/Postgres en los logs de Render
+            print("\n" + "="*50)
+            print("🚨 ERROR CRÍTICO DETECTADO EN CLASS-SECTIONS:")
+            import traceback
+            traceback.print_exc()
+            print("="*50 + "\n")
+            
+            # Devolvemos el error detallado al frontend para leerlo desde la consola del navegador
+            return Response(
+                {"error_debug": str(e), "traceback": traceback.format_exc()}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     # ENDPOINT PARA LISTAR ESTUDIANTES CON PRIVACIDAD CONDICIONAL
     @action(detail=True, methods=['get'], url_path='participants')
