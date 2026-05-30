@@ -231,6 +231,42 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
             return Response({'error': 'La actividad no existe.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    # 🌟 TU ACCIÓN PERSONALIZADA DE REORDENAMIENTO:
+    @action(detail=True, methods=['post'], url_path='reorder-chapter')
+    def reorder_chapter(self, request, pk=None):
+        """
+        Endpoint personalizado para intercalar el orden de clases base y extras
+        """
+        items = request.data.get('items', [])
+        
+        try:
+            for item in items:
+                item_id = item.get('id')
+                item_type = item.get('type')
+                new_order = item.get('order')
+
+                if item_type == 'base':
+                    # get_or_create maneja la existencia o creación del registro de control
+                    control, _ = SectionActivityControl.objects.get_or_create(
+                        section_id=pk, 
+                        activity_id=item_id  # Cámbialo si tu llave foránea tiene otro nombre
+                    )
+                    control.order = new_order
+                    control.save()
+
+                elif item_type == 'extra':
+                    try:
+                        extra = ExtracurricularActivity.objects.get(id=item_id)
+                        extra.order = new_order
+                        extra.save()
+                    except ExtracurricularActivity.DoesNotExist:
+                        continue 
+
+            return Response({"status": "ok"}, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class SectionChapterControlViewSet(viewsets.ModelViewSet):
     queryset = SectionChapterControl.objects.all()
