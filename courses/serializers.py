@@ -84,7 +84,9 @@ class ExtracurricularActivitySerializer(serializers.ModelSerializer):
 class SectionActivityControlSerializer(serializers.ModelSerializer):
     class Meta:
         model = SectionActivityControl
-        fields = '__all__'
+        # ✅ Asegúrate de incluir 'order' aquí también para que no falle la relación
+        fields = ['id', 'section', 'activity', 'is_visible', 'order', 'due_date']
+        
 class ClassSectionSerializer(serializers.ModelSerializer):
     course_details = CourseSerializer(source='course', read_only=True)
     extra_activities = ExtracurricularActivitySerializer(many=True, read_only=True)
