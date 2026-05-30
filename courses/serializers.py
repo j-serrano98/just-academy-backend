@@ -86,13 +86,12 @@ class SectionActivityControlSerializer(serializers.ModelSerializer):
         model = SectionActivityControl
         # ✅ Asegúrate de incluir 'order' aquí también para que no falle la relación
         fields = ['id', 'section', 'activity', 'is_visible', 'order', 'due_date']
-        
+
 class ClassSectionSerializer(serializers.ModelSerializer):
     course_details = CourseSerializer(source='course', read_only=True)
     extra_activities = ExtracurricularActivitySerializer(many=True, read_only=True)
     activity_controls = SectionActivityControlSerializer(many=True, read_only=True)
     
-    # CAMPOS CALCULADOS
     total_active_lessons = serializers.SerializerMethodField()
     completed_lessons_count = serializers.SerializerMethodField()
     completed_activities = serializers.SerializerMethodField()
@@ -103,7 +102,6 @@ class ClassSectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClassSection
-        # AQUÍ DEBEN ESTAR TODOS LOS CAMPOS NUEVOS
         fields = [
             'id', 'name', 'course', 'course_details', 'is_active', 
             'teachers', 'students', 'show_grades', 'extra_activities', 
@@ -114,30 +112,30 @@ class ClassSectionSerializer(serializers.ModelSerializer):
     def get_completed_activities(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
+            # 🛡️ Cambiamos 'chapter_section_id' por 'chapter_section' para blindar compatibilidades
             return list(ActivityLog.objects.filter(
                 section=obj, student=request.user, event_type='complete'
-            ).values_list('chapter_section_id', flat=True))
+            ).values_list('chapter_section', flat=True))
         return []
     
     def get_total_active_lessons(self, obj):
-        # Usamos .activity_id para obtener el número entero, no el objeto completo
+        # 🛡️ FIX: Leemos el objeto nativo .activity para extraer su ID de forma inalterable
         visible_base_ids = [
-            ctrl.activity_id for ctrl in obj.activity_controls.all() if ctrl.is_visible
+            ctrl.activity.id for ctrl in obj.activity_controls.all() if ctrl.is_visible and ctrl.activity
         ]
         total_extras = obj.extra_activities.count()
         return len(visible_base_ids) + total_extras
     
     def get_completed_lessons_count(self, obj):
-        # Usamos .activity_id para obtener el número entero aquí también
+        # 🛡️ FIX: Cambiado a ctrl.activity.id para sincronizar enteros limpios
         visible_base_ids = [
-            ctrl.activity_id for ctrl in obj.activity_controls.all() if ctrl.is_visible
+            ctrl.activity.id for ctrl in obj.activity_controls.all() if ctrl.is_visible and ctrl.activity
         ]
         extra_ids = [extra.id for extra in obj.extra_activities.all()]
         
         allowed_ids = set(visible_base_ids + extra_ids)
         completed_list = self.get_completed_activities(obj) 
         
-        # Ahora sí comparará enteros con enteros correctamente
         actual_completed = [act_id for act_id in completed_list if act_id in allowed_ids]
         return len(actual_completed)
 
@@ -172,7 +170,7 @@ class ClassSectionSerializer(serializers.ModelSerializer):
         if max_idx + 1 < len(ordered_activities):
             return ordered_activities[max_idx + 1]
         
-        return ordered_activities[0]
+        return ordered_activities[0]   
 
 class GradeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -190,9 +188,10 @@ class StudentPublicProfileSerializer(serializers.ModelSerializer):
         if 'view' in self.context and hasattr(self.context['view'], 'kwargs'):
             section_id = self.context['view'].kwargs.get('pk')
             if section_id:
+                # 🛡️ FIX: Cambiamos values().distinct() por un filtro directo count() súper eficiente
                 return ActivityLog.objects.filter(
                     section_id=section_id, student=obj, event_type='complete'
-                ).values('chapter_section').distinct().count()
+                ).count()
         return 0
 
 # 2. Serializador de Perfil Completo (Lo que ve el profesor)
@@ -207,9 +206,10 @@ class StudentAnalyticsProfileSerializer(serializers.ModelSerializer):
         if 'view' in self.context and hasattr(self.context['view'], 'kwargs'):
             section_id = self.context['view'].kwargs.get('pk')
             if section_id:
+                # 🛡️ FIX: Cambiamos values().distinct() por un filtro directo count() súper eficiente
                 return ActivityLog.objects.filter(
                     section_id=section_id, student=obj, event_type='complete'
-                ).values('chapter_section').distinct().count()
+                ).count()
         return 0
 
 class SectionChapterControlSerializer(serializers.ModelSerializer):
