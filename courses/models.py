@@ -136,6 +136,7 @@ class SectionActivityControl(models.Model):
     
     # Cambiamos is_unlocked a is_visible para que funcione con los botones de "ojito" del frontend
     is_visible = models.BooleanField(default=False) 
+    order = models.IntegerField(default=0, null=True, blank=True)
     
     due_date = models.DateTimeField(null=True, blank=True)
 
