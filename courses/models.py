@@ -120,6 +120,8 @@ class ExtracurricularActivity(models.Model):
     
     # Agregamos null=True, blank=True para que Django no se queje con las tareas viejas
     chapter = models.ForeignKey('Chapter', on_delete=models.CASCADE, related_name='extra_activities', null=True, blank=True)
+
+    order = models.IntegerField(default=0)
     
     title = models.CharField(max_length=200)
     section_type = models.CharField(max_length=50, choices=ChapterSection.SECTION_TYPES, default='exercise')
