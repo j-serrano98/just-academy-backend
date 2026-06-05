@@ -113,10 +113,12 @@ class ClassSectionSerializer(serializers.ModelSerializer):
     def get_completed_activities(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            # 🛡️ Cambiamos 'chapter_section_id' por 'chapter_section' para blindar compatibilidades
-            return list(ActivityLog.objects.filter(
+            completed_ids = ActivityLog.objects.filter(
                 section=obj, student=request.user, event_type='complete'
-            ).values_list('chapter_section', flat=True))
+            ).values_list('chapter_section', flat=True)
+            
+            # 🌟 MAGIA: Si el ID es negativo es Extra, si es positivo es Base
+            return [f"extra-{abs(cid)}" if cid < 0 else f"base-{cid}" for cid in completed_ids]
         return []
     
     def get_total_active_lessons(self, obj):
@@ -128,13 +130,11 @@ class ClassSectionSerializer(serializers.ModelSerializer):
         return len(visible_base_ids) + total_extras
     
     def get_completed_lessons_count(self, obj):
-        # 🛡️ FIX: Cambiado a ctrl.activity.id para sincronizar enteros limpios
-        visible_base_ids = [
-            ctrl.activity.id for ctrl in obj.activity_controls.all() if ctrl.is_visible and ctrl.activity
-        ]
-        extra_ids = [extra.id for extra in obj.extra_activities.all()]
+        # Mapeamos a los nuevos strings prefijados
+        visible_base = [f"base-{ctrl.activity.id}" for ctrl in obj.activity_controls.all() if ctrl.is_visible and ctrl.activity]
+        extra_ids = [f"extra-{extra.id}" for extra in obj.extra_activities.all()]
         
-        allowed_ids = set(visible_base_ids + extra_ids)
+        allowed_ids = set(visible_base + extra_ids)
         completed_list = self.get_completed_activities(obj) 
         
         actual_completed = [act_id for act_id in completed_list if act_id in allowed_ids]
