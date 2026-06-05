@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (CourseViewSet, ModuleViewSet, ChapterViewSet, 
                     ChapterSectionViewSet, ClassSectionViewSet, GradeViewSet,
                     SectionChapterControlViewSet, ActivityLogViewSet,
-                    ExtracurricularActivityViewSet)
+                    ExtracurricularActivityViewSet, global_stats)
 
 router = DefaultRouter()
 router.register(r'courses', CourseViewSet)
@@ -18,4 +18,5 @@ router.register(r'extracurriculars', ExtracurricularActivityViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('global-stats/', global_stats, name='global-stats'),
 ]

@@ -71,7 +71,8 @@ class CourseSerializer(serializers.ModelSerializer):
 
     def get_is_enrolled(self, obj):
         request = self.context.get('request')
-        if request and request.user.is_authenticated:
+        # 🛡️ Esto está perfecto, ya previene que falle si el usuario no está autenticado:
+        if request and request.user and request.user.is_authenticated:
             return ClassSection.objects.filter(course=obj, students=request.user).exists()
         return False
     

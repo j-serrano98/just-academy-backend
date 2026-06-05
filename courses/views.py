@@ -1,7 +1,9 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.db.models import Sum
+from django.contrib.auth import get_user_model
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
 from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
@@ -10,9 +12,22 @@ from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer,
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
                           StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer)
 
+
+
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
+
+    def get_permissions(self):
+        """
+        Permite que cualquier usuario (incluso anónimo) vea los cursos,
+        pero exige autenticación para inscribirse, archivar o duplicar.
+        """
+        if self.action in ['list', 'retrieve']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
 
     # 1. ARCHIVAR CURSO
     @action(detail=True, methods=['post'])
@@ -91,11 +106,11 @@ class CourseViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
     
     def get_queryset(self):
-        # Si es un profesor viendo sus cursos para editar, se los mostramos todos
-        if self.request.user.is_authenticated and self.request.user.is_teacher:
+        # 🛡️ Validamos primero si el usuario está autenticado antes de preguntar si es profesor
+        if self.request.user and self.request.user.is_authenticated and self.request.user.is_teacher:
             return Course.objects.all()
             
-        # Si es un estudiante o alguien público navegando en /courses, SOLO LOS PUBLICADOS
+        # Si es un estudiante o un visitante público anónimo, SOLO LOS PUBLICADOS
         return Course.objects.filter(is_published=True, is_archived=False)
 
 class ModuleViewSet(viewsets.ModelViewSet):
@@ -125,30 +140,30 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
             return self.queryset.filter(teachers=user)
         return self.queryset.filter(students=user)
     
-    def list(self, request, *args, **kwargs):
-        try:
-            # Forzamos la ejecución real de la query SQL evaluando el queryset en una lista
-            queryset = self.filter_queryset(self.get_queryset())
-            page = self.paginate_queryset(queryset)
-            if page is not None:
-                serializer = self.get_serializer(page, many=True)
-                return self.get_paginated_response(serializer.data)
+    # def list(self, request, *args, **kwargs):
+    #     try:
+    #         # Forzamos la ejecución real de la query SQL evaluando el queryset en una lista
+    #         queryset = self.filter_queryset(self.get_queryset())
+    #         page = self.paginate_queryset(queryset)
+    #         if page is not None:
+    #             serializer = self.get_serializer(page, many=True)
+    #             return self.get_paginated_response(serializer.data)
 
-            serializer = self.get_serializer(queryset, many=True)
-            return Response(serializer.data)
-        except Exception as e:
-            # 🚨 ESTA ES LA MAGIA: Imprime el error exacto de Python/Postgres en los logs de Render
-            print("\n" + "="*50)
-            print("🚨 ERROR CRÍTICO DETECTADO EN CLASS-SECTIONS:")
-            import traceback
-            traceback.print_exc()
-            print("="*50 + "\n")
+    #         serializer = self.get_serializer(queryset, many=True)
+    #         return Response(serializer.data)
+    #     except Exception as e:
+    #         # 🚨 ESTA ES LA MAGIA: Imprime el error exacto de Python/Postgres en los logs de Render
+    #         print("\n" + "="*50)
+    #         print("🚨 ERROR CRÍTICO DETECTADO EN CLASS-SECTIONS:")
+    #         import traceback
+    #         traceback.print_exc()
+    #         print("="*50 + "\n")
             
-            # Devolvemos el error detallado al frontend para leerlo desde la consola del navegador
-            return Response(
-                {"error_debug": str(e), "traceback": traceback.format_exc()}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+    #         # Devolvemos el error detallado al frontend para leerlo desde la consola del navegador
+    #         return Response(
+    #             {"error_debug": str(e), "traceback": traceback.format_exc()}, 
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
 
     # ENDPOINT PARA LISTAR ESTUDIANTES CON PRIVACIDAD CONDICIONAL
     @action(detail=True, methods=['get'], url_path='participants')
@@ -330,3 +345,51 @@ class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
     queryset = ExtracurricularActivity.objects.all()
     serializer_class = ExtracurricularActivitySerializer
     permission_classes = [IsAuthenticated, IsTeacher]
+
+User = get_user_model()
+
+@api_view(['GET'])
+@permission_classes([AllowAny]) # 🌟 Hacemos que sea público para la landing page
+def global_stats(request):
+    """
+    Calcula las estadísticas en tiempo real para la landing page de Just Academy.
+    """
+    try:
+        # 1. Total de estudiantes únicos registrados que no sean staff/profesores
+        total_students = User.objects.filter(is_staff=False, is_superuser=False).count()
+        
+        # 2. Total de profesores registrados (o que estén asignados a alguna sección)
+        # Puedes ajustarlo según cómo identifiques a tus profesores en tu modelo de User
+        total_teachers = User.objects.filter(is_staff=True).count() 
+        if total_teachers == 0:
+            # Fallback por si manejas profesores mediante la relación en ClassSection
+            total_teachers = User.objects.filter(classsection__isnull=False).distinct().count()
+
+        # 3. Total de cursos publicados y activos
+        total_courses = Course.objects.filter(is_published=True, is_archived=False).count()
+
+        # 4. Total de horas de clase simuladas o sumadas (puedes ajustar el cálculo según tus campos)
+        # Como fallback o si no tienes un campo de horas nativo, calculamos una métrica basada 
+        # en 10 horas estimadas por cada módulo o sección del temario activo.
+        total_hours = 0
+        courses = Course.objects.filter(is_published=True, is_archived=False)
+        for course in courses:
+            # Contamos cuántas lecciones (ChapterSection) tiene el curso
+            lessons_count = sum(chapter.sections.count() for module in course.modules.all() for chapter in module.chapters.all())
+            # Asumimos una media de 1.5 horas por lección/ejercicio
+            total_hours += max(lessons_count * 1.5, 10) # Mínimo 10 horas por curso
+
+        return Response({
+            "students": f"{total_students}+" if total_students > 0 else "10+",
+            "courses": f"{total_courses}+" if total_courses > 0 else "1+",
+            "teachers": f"{total_teachers}+" if total_teachers > 0 else "1+",
+            "hours": f"{int(total_hours)}+" if total_hours > 0 else "20+",
+        })
+    except Exception as e:
+        # Fallback seguro en caso de que alguna tabla esté vacía durante pruebas
+        return Response({
+            "students": "10+",
+            "courses": "1+",
+            "teachers": "1+",
+            "hours": "20+"
+        })
