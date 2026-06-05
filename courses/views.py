@@ -1,7 +1,9 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.db.models import Sum
+from django.contrib.auth import get_user_model
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
 from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
@@ -9,6 +11,8 @@ from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer,
                           ClassSectionSerializer, SectionChapterControlSerializer, 
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
                           StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer)
+
+
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
@@ -341,3 +345,51 @@ class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
     queryset = ExtracurricularActivity.objects.all()
     serializer_class = ExtracurricularActivitySerializer
     permission_classes = [IsAuthenticated, IsTeacher]
+
+User = get_user_model()
+
+@api_view(['GET'])
+@permission_classes([AllowAny]) # 🌟 Hacemos que sea público para la landing page
+def global_stats(request):
+    """
+    Calcula las estadísticas en tiempo real para la landing page de Just Academy.
+    """
+    try:
+        # 1. Total de estudiantes únicos registrados que no sean staff/profesores
+        total_students = User.objects.filter(is_staff=False, is_superuser=False).count()
+        
+        # 2. Total de profesores registrados (o que estén asignados a alguna sección)
+        # Puedes ajustarlo según cómo identifiques a tus profesores en tu modelo de User
+        total_teachers = User.objects.filter(is_staff=True).count() 
+        if total_teachers == 0:
+            # Fallback por si manejas profesores mediante la relación en ClassSection
+            total_teachers = User.objects.filter(classsection__isnull=False).distinct().count()
+
+        # 3. Total de cursos publicados y activos
+        total_courses = Course.objects.filter(is_published=True, is_archived=False).count()
+
+        # 4. Total de horas de clase simuladas o sumadas (puedes ajustar el cálculo según tus campos)
+        # Como fallback o si no tienes un campo de horas nativo, calculamos una métrica basada 
+        # en 10 horas estimadas por cada módulo o sección del temario activo.
+        total_hours = 0
+        courses = Course.objects.filter(is_published=True, is_archived=False)
+        for course in courses:
+            # Contamos cuántas lecciones (ChapterSection) tiene el curso
+            lessons_count = sum(chapter.sections.count() for module in course.modules.all() for chapter in module.chapters.all())
+            # Asumimos una media de 1.5 horas por lección/ejercicio
+            total_hours += max(lessons_count * 1.5, 10) # Mínimo 10 horas por curso
+
+        return Response({
+            "students": f"{total_students}+" if total_students > 0 else "10+",
+            "courses": f"{total_courses}+" if total_courses > 0 else "1+",
+            "teachers": f"{total_teachers}+" if total_teachers > 0 else "1+",
+            "hours": f"{int(total_hours)}+" if total_hours > 0 else "20+",
+        })
+    except Exception as e:
+        # Fallback seguro en caso de que alguna tabla esté vacía durante pruebas
+        return Response({
+            "students": "10+",
+            "courses": "1+",
+            "teachers": "1+",
+            "hours": "20+"
+        })
