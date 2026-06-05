@@ -168,16 +168,17 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
     # ENDPOINT PARA LISTAR ESTUDIANTES CON PRIVACIDAD CONDICIONAL
     @action(detail=True, methods=['get'], url_path='participants')
     def participants(self, request, pk=None):
-        section = self.get_object() # get_object() ya valida que pertenezcan a la sección gracias a get_queryset()
+        section = self.get_object()
         students = section.students.all()
         
-        # Si es profesor, mandamos toda la analítica
+        # 🌟 VITAL: Inyectar el contexto de la vista para que el get_completed_count no dé cero
+        context = {'request': request, 'view': self}
+        
         if request.user.is_teacher:
-            serializer = StudentAnalyticsProfileSerializer(students, many=True)
+            serializer = StudentAnalyticsProfileSerializer(students, many=True, context=context)
             return Response({'is_teacher_view': True, 'participants': serializer.data})
         
-        # Si es estudiante, mandamos la versión censurada (solo nombres/avatares)
-        serializer = StudentPublicProfileSerializer(students, many=True)
+        serializer = StudentPublicProfileSerializer(students, many=True, context=context)
         return Response({'is_teacher_view': False, 'participants': serializer.data})
 
     # ENDPOINT PARA QUE EL PROFESOR VEA EL ANALYTICS DE UN ALUMNO EN ESTA SECCIÓN
@@ -241,36 +242,25 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='toggle-completion', permission_classes=[IsAuthenticated])
     def toggle_completion(self, request, pk=None):
         section = self.get_object()
-        activity_id = request.data.get('activity_id')
+        activity_id = int(request.data.get('activity_id', 0))
         is_completed = request.data.get('is_completed', True)
+        is_extra = request.data.get('is_extra', False)
         
-        try:
-            activity = ChapterSection.objects.get(id=activity_id)
+        # 🌟 Si es actividad extra, lo guardamos como un ID negativo para evitar colisión de base de datos
+        final_id = -activity_id if is_extra else activity_id
+        
+        if is_completed:
+            ActivityLog.objects.get_or_create(
+                section=section,
+                student=request.user,
+                chapter_section=final_id,
+                event_type='complete',
+                defaults={'duration_seconds': 0}
+            )
+        else:
+            ActivityLog.objects.filter(section=section, student=request.user, chapter_section=final_id, event_type='complete').delete()
             
-            if is_completed:
-                # CORRECCIÓN AQUÍ: Incluimos event_type='complete' en la BÚSQUEDA, no en el default
-                ActivityLog.objects.get_or_create(
-                    section=section,
-                    student=request.user,
-                    chapter_section=activity,
-                    event_type='complete', # <-- AHORA SÍ BUSCARÁ SOLO LOS COMPLETADOS
-                    defaults={'duration_seconds': 0}
-                )
-            else:
-                # Borramos el registro si el alumno decide desmarcarla
-                ActivityLog.objects.filter(
-                    section=section,
-                    student=request.user,
-                    chapter_section=activity,
-                    event_type='complete'
-                ).delete()
-                
-            return Response({'status': 'ok'})
-            
-        except ChapterSection.DoesNotExist:
-            return Response({'error': 'La actividad no existe.'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'status': 'ok'})
         
     # 🌟 TU ACCIÓN PERSONALIZADA DE REORDENAMIENTO:
     @action(detail=True, methods=['post'], url_path='reorder-chapter')
@@ -314,15 +304,11 @@ class SectionChapterControlViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsTeacher] # Solo profesores pueden manipular la visibilidad
 
 class ActivityLogViewSet(viewsets.ModelViewSet):
-    """
-    Endpoint para que el Frontend envíe telemetría (logs) de lo que hace el estudiante.
-    """
     queryset = ActivityLog.objects.all()
     serializer_class = ActivityLogSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # Un profesor puede ver los logs de sus secciones, un estudiante solo los suyos
         user = self.request.user
         if user.is_teacher:
             sections = ClassSection.objects.filter(teachers=user)
@@ -330,11 +316,14 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         return self.queryset.filter(student=user)
 
     def perform_create(self, serializer):
-        """
-        SEGURIDAD CRÍTICA: Forzamos que el creador del log sea el usuario que hace la petición.
-        El frontend no puede enviar "student_id=2" si el que está logueado es el 1.
-        """
-        serializer.save(student=self.request.user)
+        act_id = int(self.request.data.get('chapter_section', 0))
+        is_extra = self.request.data.get('is_extra', False)
+        
+        # Invertimos el signo si es una actividad extra
+        final_id = -act_id if is_extra else act_id
+        
+        # 🌟 Volvemos a usar 'chapter_section' normal, ya que ahora el modelo es un IntegerField
+        serializer.save(student=self.request.user, chapter_section=final_id)
 
 class GradeViewSet(viewsets.ModelViewSet):
     queryset = Grade.objects.all()

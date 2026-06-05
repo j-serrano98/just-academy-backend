@@ -102,7 +102,7 @@ class ActivityLog(models.Model):
     
     student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='activity_logs')
     section = models.ForeignKey('ClassSection', on_delete=models.CASCADE)
-    chapter_section = models.ForeignKey('ChapterSection', on_delete=models.CASCADE) # La actividad específica
+    chapter_section = models.IntegerField(help_text="ID de ChapterSection (positivo) o ExtracurricularActivity (negativo)")
     event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
     duration_seconds = models.IntegerField(default=0, help_text="Tiempo invertido en esta sesión de actividad")
     metadata = models.JSONField(null=True, blank=True) # Para guardar notas del quiz (ej: {"score": 80})
