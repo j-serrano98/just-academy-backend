@@ -219,25 +219,30 @@ class SectionChapterControlSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ActivityLogSerializer(serializers.ModelSerializer):
+    is_extra = serializers.BooleanField(write_only=True, required=False, default=False)
     class_title = serializers.SerializerMethodField()
+    student = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = ActivityLog
-        fields = ['id', 'section', 'chapter_section', 'class_title', 'event_type', 'duration_seconds', 'timestamp']
-        
+        # Volvemos a usar 'chapter_section' directamente
+        fields = ['id', 'section', 'student', 'chapter_section', 'event_type', 'duration_seconds', 'timestamp', 'is_extra', 'class_title']
+    
+    def create(self, validated_data):
+        validated_data.pop('is_extra', None)
+        return super().create(validated_data)
+
     def get_class_title(self, obj):
-        from .models import ChapterSection
+        from .models import ChapterSection, ExtracurricularActivity
         try:
-            # Si el campo se comporta como un objeto ForeignKey
-            if hasattr(obj, 'chapter_section') and hasattr(obj.chapter_section, 'title'):
-                return obj.chapter_section.title
-            
-            # Si el campo se comporta como un Integer (ID)
-            elif isinstance(obj.chapter_section, int) or isinstance(obj.chapter_section, str):
-                act = ChapterSection.objects.filter(id=int(obj.chapter_section)).first()
-                if act:
-                    return act.title
+            numeric_id = obj.chapter_section # Leemos directo
+            if numeric_id is not None:
+                if numeric_id > 0:
+                    act = ChapterSection.objects.filter(id=numeric_id).first()
+                    if act: return act.title
+                elif numeric_id < 0:
+                    extra = ExtracurricularActivity.objects.filter(id=abs(numeric_id)).first()
+                    if extra: return f"Extra: {extra.title}"
         except Exception:
             pass
-            
-        return "Actividad o Recurso Extra"
+        return "Actividad o Recurso"

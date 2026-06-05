@@ -316,11 +316,13 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         return self.queryset.filter(student=user)
 
     def perform_create(self, serializer):
-        # 🌟 Transformamos el ID a negativo en la base de datos si es una actividad extra
         act_id = int(self.request.data.get('chapter_section', 0))
         is_extra = self.request.data.get('is_extra', False)
+        
+        # Invertimos el signo si es una actividad extra
         final_id = -act_id if is_extra else act_id
         
+        # 🌟 Volvemos a usar 'chapter_section' normal, ya que ahora el modelo es un IntegerField
         serializer.save(student=self.request.user, chapter_section=final_id)
 
 class GradeViewSet(viewsets.ModelViewSet):
