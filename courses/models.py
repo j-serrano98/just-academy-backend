@@ -39,6 +39,7 @@ class ChapterSection(models.Model):
         ('video', 'Video'),
         ('reading', 'Lectura'),
         ('exercise', 'Ejercicio'),
+        ('exam', 'Examen'),
         ('quiz', 'Quiz'),
         ('game', 'Juego'),
         ('practice', 'Práctica'),
