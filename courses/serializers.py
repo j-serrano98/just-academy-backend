@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection, ExtracurricularActivity, SectionActivityControl
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission
 from django.contrib.auth import get_user_model
 from users.models import User
 User = get_user_model()
@@ -246,3 +246,19 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return "Actividad o Recurso"
+    
+
+class HomeworkSubmissionSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_avatar = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HomeworkSubmission
+        fields = ['id', 'section', 'student', 'student_name', 'student_avatar', 'activity_id', 'content', 'grade', 'feedback', 'submitted_at']
+        read_only_fields = ['student', 'student_name', 'student_avatar']
+
+    def get_student_name(self, obj):
+        return f"{obj.student.first_name} {obj.student.last_name}".strip() or obj.student.username
+        
+    def get_student_avatar(self, obj):
+        return obj.student.first_name[0].upper() if obj.student.first_name else 'U'

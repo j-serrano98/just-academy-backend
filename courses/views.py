@@ -5,12 +5,13 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Sum
 from django.contrib.auth import get_user_model
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
                           ChapterSectionSerializer, ClassSectionSerializer, GradeSerializer,
                           ClassSectionSerializer, SectionChapterControlSerializer, 
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
-                          StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer)
+                          StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer,
+                          HomeworkSubmissionSerializer)
 
 
 
@@ -382,3 +383,30 @@ def global_stats(request):
             "teachers": "1+",
             "hours": "20+"
         })
+    
+    from .models import HomeworkSubmission
+from .serializers import HomeworkSubmissionSerializer
+
+class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
+    queryset = HomeworkSubmission.objects.all()
+    serializer_class = HomeworkSubmissionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        section_id = self.request.query_params.get('section')
+        activity_id = self.request.query_params.get('activity')
+
+        qs = self.queryset
+        if section_id:
+            qs = qs.filter(section_id=section_id)
+        if activity_id:
+            qs = qs.filter(activity_id=activity_id)
+
+        # Profesores ven todas las de sus secciones, alumnos solo las suyas
+        if user.is_teacher:
+            return qs.filter(section__teachers=user)
+        return qs.filter(student=user)
+
+    def perform_create(self, serializer):
+        serializer.save(student=self.request.user)
