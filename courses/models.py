@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db.models import JSONField
 User = get_user_model()
 
 class Course(models.Model):
@@ -157,3 +158,18 @@ class SectionCustomTask(models.Model):
     due_date = models.DateTimeField(null=True, blank=True)
     url_link = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class HomeworkSubmission(models.Model):
+    section = models.ForeignKey(ClassSection, on_delete=models.CASCADE, related_name='submissions')
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submissions')
+    activity_id = models.IntegerField(help_text="ID de la actividad (Positivo=Base, Negativo=Extra)")
+    
+    # Aquí guardaremos el texto y la lista de archivos de Cloudinary
+    content = JSONField(default=dict) 
+    
+    grade = models.FloatField(null=True, blank=True)
+    feedback = models.TextField(null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('section', 'student', 'activity_id')
