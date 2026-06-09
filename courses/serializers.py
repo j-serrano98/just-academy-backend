@@ -249,13 +249,25 @@ class ActivityLogSerializer(serializers.ModelSerializer):
     
 
 class HomeworkSubmissionSerializer(serializers.ModelSerializer):
+    student_id = serializers.IntegerField(write_only=True, required=False) # 🌟 Añadido
     student_name = serializers.SerializerMethodField()
     student_avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = HomeworkSubmission
-        fields = ['id', 'section', 'student', 'student_name', 'student_avatar', 'activity_id', 'content', 'grade', 'feedback', 'submitted_at']
+        fields = ['id', 'section', 'student', 'student_id', 'student_name', 'student_avatar', 'activity_id', 'content', 'grade', 'feedback', 'submitted_at']
         read_only_fields = ['student', 'student_name', 'student_avatar']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        student_id = validated_data.pop('student_id', None)
+        
+        if request and request.user.is_teacher and student_id:
+            validated_data['student_id'] = student_id
+        else:
+            validated_data['student'] = request.user
+            
+        return super().create(validated_data)
 
     def get_student_name(self, obj):
         return f"{obj.student.first_name} {obj.student.last_name}".strip() or obj.student.username

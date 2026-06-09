@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import JSONField
+from django.utils import timezone
 User = get_user_model()
 
 class Course(models.Model):
@@ -169,7 +170,7 @@ class HomeworkSubmission(models.Model):
     
     grade = models.FloatField(null=True, blank=True)
     feedback = models.TextField(null=True, blank=True)
-    submitted_at = models.DateTimeField(auto_now=True)
+    submitted_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         unique_together = ('section', 'student', 'activity_id')

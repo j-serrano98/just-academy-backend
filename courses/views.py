@@ -407,6 +407,3 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
         if user.is_teacher:
             return qs.filter(section__teachers=user)
         return qs.filter(student=user)
-
-    def perform_create(self, serializer):
-        serializer.save(student=self.request.user)
