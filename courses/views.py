@@ -14,7 +14,6 @@ from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer,
                           HomeworkSubmissionSerializer)
 
 
-
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
@@ -384,7 +383,7 @@ def global_stats(request):
             "hours": "20+"
         })
     
-    from .models import HomeworkSubmission
+from .models import HomeworkSubmission
 from .serializers import HomeworkSubmissionSerializer
 
 class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
@@ -403,7 +402,25 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
         if activity_id:
             qs = qs.filter(activity_id=activity_id)
 
-        # Profesores ven todas las de sus secciones, alumnos solo las suyas
         if user.is_teacher:
             return qs.filter(section__teachers=user)
         return qs.filter(student=user)
+
+    def perform_create(self, serializer):
+        # Asignamos al estudiante autenticado automáticamente desde el token de sesión
+        serializer.save(student=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        # 🌟 DEJAMOS EL PAYLOAD TOTALMENTE INTACTO
+        # Next.js ya envía 'section', 'activity_id', 'grade', 'content' y 'feedback' impecables.
+        data = request.data.copy()
+
+        serializer = self.get_serializer(data=data)
+        
+        # Si algo falla aquí, este print te dirá exactamente qué campo tiene problemas
+        if not serializer.is_valid():
+            print("🚨 ERROR REAL DE VALIDACIÓN EN DJANGO:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

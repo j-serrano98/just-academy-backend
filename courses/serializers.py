@@ -197,11 +197,18 @@ class StudentPublicProfileSerializer(serializers.ModelSerializer):
 
 # 2. Serializador de Perfil Completo (Lo que ve el profesor)
 class StudentAnalyticsProfileSerializer(serializers.ModelSerializer):
+    submissions = serializers.SerializerMethodField()
     completed_count = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'completed_count']
+        fields = ['id', 'first_name', 'last_name', 'email', 'completed_count', 'submissions']
+
+    def get_submissions(self, obj):
+        # Capturamos la sección actual desde el contexto de la vista
+        section_id = self.context['view'].kwargs.get('pk')
+        submissions = obj.submissions.filter(section_id=section_id)
+        return HomeworkSubmissionSerializer(submissions, many=True).data
 
     def get_completed_count(self, obj):
         if 'view' in self.context and hasattr(self.context['view'], 'kwargs'):
