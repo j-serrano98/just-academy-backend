@@ -17,7 +17,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-l18c8_j$8mu(cg1+x7lih
 
 DEBUG = os.environ.get('RENDER', '') == ''
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.onrender.com']
+ALLOWED_HOSTS = ['*', 'localhost', '127.0.0.1', '.onrender.com']
 
 
 # Application definition
@@ -138,6 +138,8 @@ CORS_ALLOWED_ORIGINS = [
     FRONTEND_URL,
 ]
 
+CORS_ALLOW_ALL_ORIGINS = True
+
 # Configuración de Django Rest Framework y JWT
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -160,3 +162,11 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+
+# Configuración de Celery
+CELERY_BROKER_URL = 'redis://localhost:6379'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIME_ZONE = TIME_ZONE

@@ -4,15 +4,41 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Sum
 from django.contrib.auth import get_user_model
+from core.tasks import send_instant_notification
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission, Notification
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
                           ChapterSectionSerializer, ClassSectionSerializer, GradeSerializer,
                           ClassSectionSerializer, SectionChapterControlSerializer, 
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
                           StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer,
-                          HomeworkSubmissionSerializer)
+                          HomeworkSubmissionSerializer, NotificationSerializer)
 
+class NotificationViewSet(viewsets.ModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Cada estudiante SOLO ve sus propias notificaciones
+        return Notification.objects.filter(user=self.request.user)
+
+    # Acción para marcar todas las notificaciones como leídas de un golpe
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({'status': 'todas las notificaciones marcadas como leidas'}, status=status.HTTP_200_OK)
+
+    # Acción para guardar o actualizar el token del celular del usuario actual
+    @action(detail=False, methods=['post'], url_path='save-token')
+    def save_token(self, request):
+        token = request.data.get('expo_push_token')
+        if not token:
+            return Response({'error': 'Token no proporcionado'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = request.user
+        user.expo_push_token = token
+        user.save()
+        return Response({'status': 'Token guardado exitosamente'}, status=status.HTTP_200_OK)
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
@@ -224,6 +250,17 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
             control.is_visible = is_visible
             control.save()
 
+            # 🚀 LÓGICA DE NOTIFICACIONES: Solo si se está HABILITANDO el contenido
+            if is_visible:
+                for student in section.students.all():
+                    send_instant_notification.delay(
+                        user_id=student.id,
+                        notif_type='NEW_CONTENT',
+                        title='¡Nuevo material disponible! 📚',
+                        message=f'Se ha habilitado la actividad: {act.title}',
+                        target_url=f'/course/{section.id}?activityId=base-{act.id}'
+                    )
+
         return Response({'status': 'ok'})
 
     @action(detail=True, methods=['post'], url_path='set-due-date')
@@ -335,6 +372,20 @@ class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
     serializer_class = ExtracurricularActivitySerializer
     permission_classes = [IsAuthenticated, IsTeacher]
 
+    def perform_create(self, serializer):
+        # Guardar la nueva tarea
+        instance = serializer.save()
+        
+        # 🚀 LÓGICA DE NOTIFICACIONES: Avisar a todos los estudiantes de la sección
+        for student in instance.section.students.all():
+            send_instant_notification.delay(
+                user_id=student.id,
+                notif_type='NEW_TASK',
+                title='¡Nueva Asignación! 📝',
+                message=f'Se ha agregado una nueva tarea: {instance.title}',
+                target_url=f'/course/{instance.section.id}?activityId=extra-{instance.id}'
+            )
+
 User = get_user_model()
 
 @api_view(['GET'])
@@ -406,18 +457,43 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
             return qs.filter(section__teachers=user)
         return qs.filter(student=user)
 
+    # 1. Escenario H5P: Envía la nota inmediatamente al crearse
     def perform_create(self, serializer):
-        # Asignamos al estudiante autenticado automáticamente desde el token de sesión
-        serializer.save(student=self.request.user)
+        instance = serializer.save(student=self.request.user)
+        
+        # Si se guarda con nota desde la creación inicial (Ej: Auto-grade de H5P)
+        if instance.grade is not None:
+            act_prefix = "base" if instance.activity_id > 0 else "extra"
+            send_instant_notification.delay(
+                user_id=instance.student.id,
+                notif_type='GRADED',
+                title='¡Actividad Evaluada! 🎯',
+                message=f'Tu puntuación es {instance.grade}/100.',
+                target_url=f'/course/{instance.section.id}?activityId={act_prefix}-{abs(instance.activity_id)}'
+            )
+
+    # 2. Escenario Profesor: Edita una entrega existente para ponerle nota
+    def perform_update(self, serializer):
+        old_instance = self.get_object()
+        old_grade = old_instance.grade
+        
+        new_instance = serializer.save()
+
+        # Si no tenía nota y ahora sí, o si la nota cambió
+        if new_instance.grade is not None and old_grade != new_instance.grade:
+            act_prefix = "base" if new_instance.activity_id > 0 else "extra"
+            send_instant_notification.delay(
+                user_id=new_instance.student.id,
+                notif_type='GRADED',
+                title='¡Tarea Calificada! 💯',
+                message=f'El profesor ha evaluado tu entrega. Nota: {new_instance.grade}/100.',
+                target_url=f'/course/{new_instance.section.id}?activityId={act_prefix}-{abs(new_instance.activity_id)}'
+            )
 
     def create(self, request, *args, **kwargs):
-        # 🌟 DEJAMOS EL PAYLOAD TOTALMENTE INTACTO
-        # Next.js ya envía 'section', 'activity_id', 'grade', 'content' y 'feedback' impecables.
         data = request.data.copy()
-
         serializer = self.get_serializer(data=data)
         
-        # Si algo falla aquí, este print te dirá exactamente qué campo tiene problemas
         if not serializer.is_valid():
             print("🚨 ERROR REAL DE VALIDACIÓN EN DJANGO:", serializer.errors)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

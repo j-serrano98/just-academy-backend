@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, Notification
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
@@ -27,6 +27,7 @@ class ClassSectionAdmin(admin.ModelAdmin):
     filter_horizontal = ('teachers', 'students') # Interfaz limpia para seleccionar múltiples usuarios
 
 admin.site.register(Grade)
+admin.site.register(Notification)
 
 @admin.register(SectionChapterControl)
 class SectionChapterControlAdmin(admin.ModelAdmin):

@@ -3,10 +3,11 @@ from rest_framework.routers import DefaultRouter
 from .views import (CourseViewSet, ModuleViewSet, ChapterViewSet, 
                     ChapterSectionViewSet, ClassSectionViewSet, GradeViewSet,
                     SectionChapterControlViewSet, ActivityLogViewSet,
-                    ExtracurricularActivityViewSet, HomeworkSubmissionViewSet,
+                    ExtracurricularActivityViewSet, HomeworkSubmissionViewSet, NotificationViewSet,
                     global_stats)
 
 router = DefaultRouter()
+router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'courses', CourseViewSet)
 router.register(r'modules', ModuleViewSet)
 router.register(r'chapters', ChapterViewSet)

@@ -5,6 +5,30 @@ from django.db.models import JSONField
 from django.utils import timezone
 User = get_user_model()
 
+
+class Notification(models.Model):
+    TYPE_CHOICES = [
+        ('NEW_CONTENT', 'Nuevo Contenido'),
+        ('NEW_TASK', 'Nueva Tarea'),
+        ('GRADED', 'Calificada'),
+        ('DUE_SOON', 'Por Vencer'),
+        ('ANNOUNCEMENT', 'Anuncio General'),
+    ]
+    
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    target_url = models.CharField(max_length=255, help_text="Ruta en la app móvil (ej: /course/1)") 
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.title}"
+    
 class Course(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
