@@ -1,9 +1,16 @@
 from rest_framework import serializers
-from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission
+from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, SectionChapterControl, ActivityLog, ClassSection, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission, Notification
 from django.contrib.auth import get_user_model
 from users.models import User
 User = get_user_model()
 
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'notification_type', 'title', 'message', 'target_url', 'is_read', 'created_at']
+        read_only_fields = ['id', 'notification_type', 'title', 'message', 'target_url', 'created_at']
+
+        
 class UserProfileSerializer(serializers.ModelSerializer):
     # Traemos las secciones donde el usuario está inscrito
     enrolled_sections = serializers.SerializerMethodField()
