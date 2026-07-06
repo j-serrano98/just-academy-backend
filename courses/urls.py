@@ -22,5 +22,5 @@ router.register(r'submissions', HomeworkSubmissionViewSet, basename='submissions
 urlpatterns = [
     path('', include(router.urls)),
     path('global-stats/', global_stats, name='global-stats'),
-    path('api/cron/check-vencimientos/', trigger_due_notifications_cron, name='cron-vencimientos'),
+    path('cron/check-expiry/', trigger_due_notifications_cron, name='cron-vencimientos'),
 ]
