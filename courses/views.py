@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Sum
 from django.contrib.auth import get_user_model
-from core.tasks import send_instant_notification
+from core.tasks import send_instant_notification, check_due_assignments
+from django.conf import settings
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
 from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission, Notification
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
@@ -253,7 +254,7 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
             # 🚀 LÓGICA DE NOTIFICACIONES: Solo si se está HABILITANDO el contenido
             if is_visible:
                 for student in section.students.all():
-                    send_instant_notification.delay(
+                    send_instant_notification(
                         user_id=student.id,
                         notif_type='NEW_CONTENT',
                         title='¡Nuevo material disponible! 📚',
@@ -378,7 +379,7 @@ class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
         
         # 🚀 LÓGICA DE NOTIFICACIONES: Avisar a todos los estudiantes de la sección
         for student in instance.section.students.all():
-            send_instant_notification.delay(
+            send_instant_notification(
                 user_id=student.id,
                 notif_type='NEW_TASK',
                 title='¡Nueva Asignación! 📝',
@@ -464,7 +465,7 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
         # Si se guarda con nota desde la creación inicial (Ej: Auto-grade de H5P)
         if instance.grade is not None:
             act_prefix = "base" if instance.activity_id > 0 else "extra"
-            send_instant_notification.delay(
+            send_instant_notification(
                 user_id=instance.student.id,
                 notif_type='GRADED',
                 title='¡Actividad Evaluada! 🎯',
@@ -482,7 +483,7 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
         # Si no tenía nota y ahora sí, o si la nota cambió
         if new_instance.grade is not None and old_grade != new_instance.grade:
             act_prefix = "base" if new_instance.activity_id > 0 else "extra"
-            send_instant_notification.delay(
+            send_instant_notification(
                 user_id=new_instance.student.id,
                 notif_type='GRADED',
                 title='¡Tarea Calificada! 💯',
@@ -500,3 +501,22 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
             
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+@api_view(['POST'])
+@permission_classes([AllowAny]) 
+def trigger_due_notifications_cron(request):
+    cron_key = request.data.get('cron_key')
+    
+    # 🛡️ Protección básica: Comparamos con una variable de entorno
+    # Si no la has configurado en settings.py, usará el string por defecto para pruebas
+    expected_key = getattr(settings, 'CRON_SECRET_KEY', 'un-token-super-secreto-local')
+    
+    if not cron_key or cron_key != expected_key:
+        return Response({"error": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+        
+    total_sent = check_due_assignments()
+    
+    return Response({
+        "status": "cron ejecutado con éxito",
+        "notificaciones_disparadas": total_sent
+    }, status=status.HTTP_200_OK)
