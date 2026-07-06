@@ -4,7 +4,7 @@ from .views import (CourseViewSet, ModuleViewSet, ChapterViewSet,
                     ChapterSectionViewSet, ClassSectionViewSet, GradeViewSet,
                     SectionChapterControlViewSet, ActivityLogViewSet,
                     ExtracurricularActivityViewSet, HomeworkSubmissionViewSet, NotificationViewSet,
-                    global_stats)
+                    global_stats, trigger_due_notifications_cron)
 
 router = DefaultRouter()
 router.register(r'notifications', NotificationViewSet, basename='notifications')
@@ -22,4 +22,5 @@ router.register(r'submissions', HomeworkSubmissionViewSet, basename='submissions
 urlpatterns = [
     path('', include(router.urls)),
     path('global-stats/', global_stats, name='global-stats'),
+    path('api/cron/check-vencimientos/', trigger_due_notifications_cron, name='cron-vencimientos'),
 ]
