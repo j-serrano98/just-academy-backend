@@ -4,7 +4,7 @@ from .views import (CourseViewSet, ModuleViewSet, ChapterViewSet,
                     ChapterSectionViewSet, ClassSectionViewSet, GradeViewSet,
                     SectionChapterControlViewSet, ActivityLogViewSet,
                     ExtracurricularActivityViewSet, HomeworkSubmissionViewSet, NotificationViewSet,
-                    global_stats, trigger_due_notifications_cron)
+                    global_stats, trigger_due_notifications_cron, google_login)
 
 router = DefaultRouter()
 router.register(r'notifications', NotificationViewSet, basename='notifications')
@@ -23,4 +23,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('global-stats/', global_stats, name='global-stats'),
     path('cron/check-expiry/', trigger_due_notifications_cron, name='cron-vencimientos'),
+    path('api/auth/google/', google_login, name='google-login'),
 ]

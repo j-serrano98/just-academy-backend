@@ -6,6 +6,9 @@ from django.db.models import Sum
 from django.contrib.auth import get_user_model
 from core.tasks import send_instant_notification, check_due_assignments
 from django.conf import settings
+from rest_framework_simplejwt.tokens import RefreshToken
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from .permissions import IsTeacher, IsTeacherOfSectionOrReadOnly
 from .models import Course, Module, Chapter, ChapterSection, ClassSection, Grade, ClassSection, SectionChapterControl, ActivityLog, ExtracurricularActivity, SectionActivityControl, HomeworkSubmission, Notification
 from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer, 
@@ -14,6 +17,9 @@ from .serializers import (CourseSerializer, ModuleSerializer, ChapterSerializer,
                           ActivityLogSerializer, StudentPublicProfileSerializer, 
                           StudentAnalyticsProfileSerializer, ExtracurricularActivitySerializer,
                           HomeworkSubmissionSerializer, NotificationSerializer)
+
+
+User = get_user_model()
 
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
@@ -257,7 +263,7 @@ class ClassSectionViewSet(viewsets.ModelViewSet):
                     send_instant_notification(
                         user_id=student.id,
                         notif_type='NEW_CONTENT',
-                        title='¡Nuevo material disponible! 📚',
+                        title='¡Nuevo material disponible!',
                         message=f'Se ha habilitado la actividad: {act.title}',
                         target_url=f'/course/{section.id}?activityId=base-{act.id}'
                     )
@@ -382,7 +388,7 @@ class ExtracurricularActivityViewSet(viewsets.ModelViewSet):
             send_instant_notification(
                 user_id=student.id,
                 notif_type='NEW_TASK',
-                title='¡Nueva Asignación! 📝',
+                title='¡Nueva Asignación!',
                 message=f'Se ha agregado una nueva tarea: {instance.title}',
                 target_url=f'/course/{instance.section.id}?activityId=extra-{instance.id}'
             )
@@ -468,8 +474,8 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
             send_instant_notification(
                 user_id=instance.student.id,
                 notif_type='GRADED',
-                title='¡Actividad Evaluada! 🎯',
-                message=f'Tu puntuación es {instance.grade}/100.',
+                title='¡Actividad Evaluada!',
+                message=f'El profesor ha evualuado la actividad.',
                 target_url=f'/course/{instance.section.id}?activityId={act_prefix}-{abs(instance.activity_id)}'
             )
 
@@ -486,8 +492,8 @@ class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
             send_instant_notification(
                 user_id=new_instance.student.id,
                 notif_type='GRADED',
-                title='¡Tarea Calificada! 💯',
-                message=f'El profesor ha evaluado tu entrega. Nota: {new_instance.grade}/100.',
+                title='¡Tarea Calificada!',
+                message=f'El profesor ha evaluado tu entrega.',
                 target_url=f'/course/{new_instance.section.id}?activityId={act_prefix}-{abs(new_instance.activity_id)}'
             )
 
@@ -520,3 +526,64 @@ def trigger_due_notifications_cron(request):
         "status": "cron ejecutado con éxito",
         "notificaciones_disparadas": total_sent
     }, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def google_login(request):
+    token = request.data.get('id_token')
+    
+    if not token:
+        return Response({"error": "No se proporcionó el token de Google."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # 1. Validar el token con los servidores de Google
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            google_requests.Request(), 
+            settings.GOOGLE_WEB_CLIENT_ID
+        )
+
+        # 2. Extraer los datos del usuario
+        email = idinfo.get('email')
+        first_name = idinfo.get('given_name', '')
+        last_name = idinfo.get('family_name', '')
+
+        # Si quieres restringir dominios (ej. solo correos de una empresa/universidad), lo harías aquí:
+        # if idinfo.get('hd') != 'midominio.com': raise ValueError('Dominio no permitido')
+
+        # 3. Buscar o crear al usuario en tu base de datos
+        # Usamos get_or_create para que el login sirva también como registro automático
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                'first_name': first_name,
+                'last_name': last_name,
+                'username': email.split('@')[0], # Genera un username base
+                # Si tu modelo requiere contraseña, pon una inusable:
+                # 'password': make_password(None) 
+            }
+        )
+
+        # 4. Generar los JWT propios de tu aplicación
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            "status": "success",
+            "is_new_user": created,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+            "tokens": {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+            }
+        }, status=status.HTTP_200_OK)
+
+    except ValueError as e:
+        # Token inválido, expirado o manipulado
+        return Response({"error": "Token de Google inválido o expirado."}, status=status.HTTP_401_UNAUTHORIZED)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
