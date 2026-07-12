@@ -164,3 +164,5 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 
 CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
+
+GOOGLE_WEB_CLIENT_ID = os.environ.get('GOOGLE_WEB_CLIENT_ID')
